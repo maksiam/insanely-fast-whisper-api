@@ -6,6 +6,7 @@ from fastapi import (
     Body,
     BackgroundTasks,
     Request,
+    UploadFile
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -15,6 +16,8 @@ from .diarization_pipeline import diarize
 import requests
 import asyncio
 import uuid
+import shutil
+from .temp_helper import TempFileManager
 
 
 admin_key = os.environ.get(
@@ -124,20 +127,26 @@ async def admin_key_auth_check(request: Request, call_next):
 
 @app.post("/")
 def root(
-    url: str = Body(),
-    task: str = Body(default="transcribe", enum=["transcribe", "translate"]),
-    language: str = Body(default="None"),
-    batch_size: int = Body(default=64),
-    timestamp: str = Body(default="chunk", enum=["chunk", "word"]),
-    diarise_audio: bool = Body(
-        default=False,
-    ),
+    file: UploadFile,
+    task: str = "transcribe",
+    language: str = "None",
+    batch_size: int =64,
+    timestamp: str = "chunk",
+    diarise_audio: bool = False,
     webhook: WebhookBody | None = None,
-    is_async: bool = Body(default=False),
-    managed_task_id: str | None = Body(default=None),
+    is_async: bool = False,
+    managed_task_id: str = None,
 ):
-    if url.lower().startswith("http") is False:
-        raise HTTPException(status_code=400, detail="Invalid URL")
+    # if url.lower().startswith("http") is False:
+    #     raise HTTPException(status_code=400, detail="Invalid URL")
+    torch.cuda.reset_peak_memory_stats(device="cuda")
+    temp_manager = TempFileManager()
+    temp_dir_files = temp_manager.create_temp_dir("files_")
+    temp_file = temp_manager.create_temp_file(dir=temp_dir_files)
+    # receive audio file and save it locally
+    with open(temp_file, "wb") as file_object:
+        shutil.copyfileobj(file.file, file_object)
+    url = temp_file
 
     if diarise_audio is True and hf_token is None:
         raise HTTPException(status_code=500, detail="Missing Hugging Face Token")
@@ -191,6 +200,7 @@ def root(
             }
         if fly_machine_id is not None:
             resp["fly_machine_id"] = fly_machine_id
+        resp["gpu_max_bytes"] = torch.cuda.max_memory_allocated(device="cuda")
         return resp
     except Exception as e:
         print(e)

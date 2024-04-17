@@ -24,6 +24,7 @@ RUN poetry install --no-root
 COPY . .
 
 RUN poetry install
+RUN poetry add python-multipart
 RUN $POETRY_VENV/bin/pip install -U wheel \
     && $POETRY_VENV/bin/pip install ninja packaging
 
